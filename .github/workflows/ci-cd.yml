@@ -1,0 +1,106 @@
+name: CI/CD Pipeline - Deploy to Azure Web App
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+env:
+  # AZURE_WEBAPP_NAME should be stored as a GitHub Actions secret named `AZURE_WEBAPP_NAME`.
+  # Set the secret in your repository settings (Settings -> Secrets and variables -> Actions).
+  AZURE_WEBAPP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
+  DOTNET_VERSION: '10.0.x'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run tests
+        run: dotnet test --no-build --verbosity normal --configuration Release
+
+      - name: Publish application
+        run: dotnet publish -c Release -o publish
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: publish/
+
+  deploy-to-azure:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/master') || startsWith(github.ref, 'refs/heads/main'))
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: publish/
+      - name: Debug: Print environment variables
+        run: |
+          echo "GITHUB_ENVIRONMENT VARIABLES:" && printenv
+          echo "GITHUB_CONTEXT:" && echo "${{ toJson(github) }}"
+      - name: Debug: List files before deploy
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Listing files in publish/ directory:"
+          ls -alR publish/
+      - name: Debug AZURE_CREDENTIALS (pre-login)
+        run: |
+          echo "Checking AZURE_CREDENTIALS keys (names only)"
+          # print JSON keys from the secret (values are masked)
+          echo "${{ secrets.AZURE_CREDENTIALS }}" | python3 -c "import sys,json; d=json.load(sys.stdin); print('\n'.join(d.keys()))" || echo "Failed to parse AZURE_CREDENTIALS or python3 not available"
+          echo "subscriptionId presence check"
+          echo "${{ secrets.AZURE_CREDENTIALS }}" | python3 -c "import sys,json; d=json.load(sys.stdin); print('present' if d.get('subscriptionId') else 'missing/empty')" || true
+      - name: Debug: Azure CLI version
+        run: az version
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Debug: List files before Azure Web App deploy
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Listing files in publish/ directory:"
+          ls -alR publish/
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: publish/
+      - name: Debug: List files after Azure Web App deploy
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Listing files in publish/ directory:"
+          ls -alR publish/
+      - name: Azure Logout
+        run: az logout
