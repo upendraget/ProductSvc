@@ -7,8 +7,8 @@ on:
     branches: [ "master", "main" ]
 
 env:
-  AZURE_WEBAPP_NAME: "ProductSvc"  # CHANGE THIS to your actual Azure Web App name
-  DOTNET_VERSION: '10.0.x'
+  AZURE_WEBAPP_NAME: "ProductSvc"   # Change to your Web App name
+  DOTNET_VERSION: '10.0.x'          # .NET 10 (Preview)
 
 jobs:
   build-and-test:
@@ -18,10 +18,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup .NET
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+          include-prerelease: true   # 🔥 IMPORTANT for .NET 10
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -38,7 +39,7 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Run tests
-        run: dotnet test --no-build --verbosity normal --configuration Release
+        run: dotnet test --no-build --configuration Release --verbosity normal
 
       - name: Publish application
         run: dotnet publish -c Release -o publish
@@ -64,21 +65,23 @@ jobs:
           name: build-artifacts
           path: publish/
 
-      - name: Debug AZURE_CREDENTIALS (pre-login)
-        run: |
-          echo "Checking AZURE_CREDENTIALS keys (names only)"
-          # print JSON keys from the secret (values are masked)
-          echo "${{ secrets.AZURE_CREDENTIALS }}" | python3 -c "import sys,json; d=json.load(sys.stdin); print('\n'.join(d.keys()))" || echo "Failed to parse AZURE_CREDENTIALS or python3 not available"
+      # 🔍 Validate credentials (safe debug)
+      - name: Validate AZURE_CREDENTIALS
+        run: echo '${{ secrets.AZURE_CREDENTIALS }}' | python3 -c "import sys,json; d=json.load(sys.stdin); print('clientId:', 'OK' if d.get('clientId') else 'MISSING'); print('tenantId:', 'OK' if d.get('tenantId') else 'MISSING'); print('subscriptionId:', 'OK' if d.get('subscriptionId') else 'MISSING')"
 
-          echo "subscriptionId presence check"
-          echo "${{ secrets.AZURE_CREDENTIALS }}" | python3 -c "import sys,json; d=json.load(sys.stdin); print('present' if d.get('subscriptionId') else 'missing/empty')" || true
-
+      # 🔐 Azure Login
       - name: Azure Login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # ✅ This step will confirm your issue is resolved
+      - name: Verify Azure Access
+        run: |
+          az account show
+          az account list --output table
 
+      # 🚀 Deploy
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
