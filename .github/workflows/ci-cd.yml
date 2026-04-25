@@ -7,7 +7,7 @@ on:
     branches: [ "master", "main" ]
 
 env:
-  AZURE_WEBAPP_NAME: "ProductSvc"   # Change to your Web App name
+  AZURE_WEBAPP_NAME: "ProductAPI20260409105733"   # Change to your Web App name
   DOTNET_VERSION: '10.0.x'          # .NET 10 (Preview)
 
 jobs:
